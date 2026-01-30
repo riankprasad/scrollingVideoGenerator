@@ -71,9 +71,14 @@ const elements = {
   speed: document.getElementById("speed"),
   warning: document.getElementById("warning"),
   qrUrl: document.getElementById("qrUrl"),
+  qrStyle: document.getElementById("qrStyle"),
   qrSize: document.getElementById("qrSize"),
   qrX: document.getElementById("qrX"),
   qrY: document.getElementById("qrY"),
+  qrLabel: document.getElementById("qrLabel"),
+  qrLabelSize: document.getElementById("qrLabelSize"),
+  qrLabelColor: document.getElementById("qrLabelColor"),
+  qrStatus: document.getElementById("qrStatus"),
   generateQr: document.getElementById("generateQr"),
   downloadQrPng: document.getElementById("downloadQrPng"),
   downloadQrSvg: document.getElementById("downloadQrSvg"),
@@ -849,6 +854,17 @@ function drawQr() {
   const x = Number(elements.qrX.value) || 0;
   const y = Number(elements.qrY.value) || 0;
   ctx.drawImage(qrImage, x, y, size, size);
+
+  const label = elements.qrLabel?.value?.trim();
+  if (label) {
+    const labelSize = Number(elements.qrLabelSize?.value) || 20;
+    ctx.font = `600 ${labelSize}px Inter, system-ui, sans-serif`;
+    ctx.fillStyle = elements.qrLabelColor?.value || "#ffffff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    const labelY = y + size + 8;
+    ctx.fillText(label, x + size / 2, labelY);
+  }
 }
 
 function animate(now) {
@@ -861,22 +877,128 @@ function animate(now) {
   requestAnimationFrame(animate);
 }
 
-function generateQr() {
+function updateQrStatus(message) {
+  if (!elements.qrStatus) return;
+  elements.qrStatus.textContent = message;
+}
+
+async function generateQr() {
+  const url = elements.qrUrl.value.trim();
+  if (!url) {
+    updateQrStatus("Provide a URL to generate a QR code.");
+    return;
+  }
+  const style = elements.qrStyle?.value || "classic";
+  updateQrStatus("Generating QR code...");
+
+  if (style !== "classic" && window.QRCodeStyling) {
+    const qrCode = new QRCodeStyling({
+      width: 512,
+      height: 512,
+      type: "canvas",
+      data: url,
+      margin: 4,
+      dotsOptions: {
+        type: style === "dots" ? "dots" : style === "classy" ? "classy" : "rounded",
+        color: "#000000",
+      },
+      backgroundOptions: {
+        color: "transparent",
+      },
+      cornersSquareOptions: {
+        type: style === "classy" ? "extra-rounded" : "rounded",
+      },
+      cornersDotOptions: {
+        type: style === "dots" ? "dot" : "rounded",
+      },
+    });
+
+    const blob = await qrCode.getRawData("png");
+    if (blob) {
+      const dataUrl = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        qrImage = img;
+        refreshPreview();
+        URL.revokeObjectURL(dataUrl);
+      };
+      img.src = dataUrl;
+    }
+
+    const svgBlob = await qrCode.getRawData("svg");
+    if (svgBlob) {
+      qrSvg = await svgBlob.text();
+    }
+  } else {
+    QRCode.toDataURL(url, { width: 512, margin: 1 }, (err, dataUrl) => {
+      if (err) {
+        updateQrStatus("QR generation failed.");
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        qrImage = img;
+        refreshPreview();
+      };
+      img.src = dataUrl;
+    });
+
+    QRCode.toString(url, { type: "svg", margin: 1 }, (err, svg) => {
+      if (err) return;
+      qrSvg = svg;
+    });
+  }
+
+  logQrGeneration();
+  updateQrStatus("QR code ready.");
+}
+
+async function logQrGeneration() {
   const url = elements.qrUrl.value.trim();
   if (!url) return;
-  QRCode.toDataURL(url, { width: 512, margin: 1 }, (err, dataUrl) => {
-    if (err) return;
-    const img = new Image();
-    img.onload = () => {
-      qrImage = img;
-    };
-    img.src = dataUrl;
+  const payload = new URLSearchParams({
+    action: "save_qr_log",
+    url,
+    style: elements.qrStyle?.value || "classic",
+    size: elements.qrSize.value || "160",
+    x: elements.qrX.value || "0",
+    y: elements.qrY.value || "0",
+    label: elements.qrLabel?.value || "",
+    labelSize: elements.qrLabelSize?.value || "20",
+    labelColor: elements.qrLabelColor?.value || "#ffffff",
   });
+  try {
+    await fetch(window.location.pathname + window.location.search, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: payload.toString(),
+    });
+  } catch {
+    // no-op
+  }
+}
 
-  QRCode.toString(url, { type: "svg", margin: 1 }, (err, svg) => {
-    if (err) return;
-    qrSvg = svg;
-  });
+function buildQrCompositePng() {
+  if (!qrImage) return null;
+  const size = Number(elements.qrSize.value) || 160;
+  const label = elements.qrLabel?.value?.trim();
+  const labelSize = Number(elements.qrLabelSize?.value) || 20;
+  const labelPadding = label ? 10 + labelSize : 0;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size + labelPadding;
+  const cctx = canvas.getContext("2d");
+  if (!cctx) return null;
+  cctx.clearRect(0, 0, canvas.width, canvas.height);
+  cctx.drawImage(qrImage, 0, 0, size, size);
+  if (label) {
+    cctx.font = `600 ${labelSize}px Inter, system-ui, sans-serif`;
+    cctx.fillStyle = elements.qrLabelColor?.value || "#ffffff";
+    cctx.textAlign = "center";
+    cctx.textBaseline = "top";
+    cctx.fillText(label, size / 2, size + 8);
+  }
+  return canvas.toDataURL("image/png");
 }
 
 function downloadDataUrl(dataUrl, filename) {
@@ -973,7 +1095,12 @@ function bindEvents() {
   }
   if (elements.downloadQrPng) {
     elements.downloadQrPng.addEventListener("click", () => {
-      if (qrImage) downloadDataUrl(qrImage.src, "qr-code.png");
+      const composite = buildQrCompositePng();
+      if (composite) {
+        downloadDataUrl(composite, "qr-code.png");
+      } else if (qrImage) {
+        downloadDataUrl(qrImage.src, "qr-code.png");
+      }
     });
   }
   if (elements.downloadQrSvg) {
@@ -1041,6 +1168,27 @@ function bindEvents() {
   }
   if (elements.captionScrollText) {
     elements.captionScrollText.addEventListener("input", updateCaptionPreview);
+  }
+  if (elements.qrStyle) {
+    elements.qrStyle.addEventListener("change", generateQr);
+  }
+  if (elements.qrLabel) {
+    elements.qrLabel.addEventListener("input", refreshPreview);
+  }
+  if (elements.qrLabelSize) {
+    elements.qrLabelSize.addEventListener("input", refreshPreview);
+  }
+  if (elements.qrLabelColor) {
+    elements.qrLabelColor.addEventListener("input", refreshPreview);
+  }
+  if (elements.qrSize) {
+    elements.qrSize.addEventListener("input", refreshPreview);
+  }
+  if (elements.qrX) {
+    elements.qrX.addEventListener("input", refreshPreview);
+  }
+  if (elements.qrY) {
+    elements.qrY.addEventListener("input", refreshPreview);
   }
   if (elements.bgMode) {
     elements.bgMode.addEventListener("change", updateBackgroundModeUI);

@@ -394,6 +394,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_
   $relativeUrl = '/captions/' . $slug . '/';
   respond_json(['ok' => true, 'url' => $relativeUrl]);
 }
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_qr_log') {
+  $url = trim($_POST['url'] ?? '');
+  if ($url === '') {
+    respond_json(['ok' => false, 'message' => 'URL is required.'], 400);
+  }
+  $entry = [
+    'url' => $url,
+    'style' => trim($_POST['style'] ?? 'classic'),
+    'size' => (int)($_POST['size'] ?? 160),
+    'x' => (int)($_POST['x'] ?? 0),
+    'y' => (int)($_POST['y'] ?? 0),
+    'label' => trim($_POST['label'] ?? ''),
+    'labelSize' => (int)($_POST['labelSize'] ?? 20),
+    'labelColor' => trim($_POST['labelColor'] ?? '#ffffff'),
+    'created_at' => date('c'),
+  ];
+
+  $file = __DIR__ . '/data/qr-logs.json';
+  if (!is_dir(__DIR__ . '/data')) {
+    mkdir(__DIR__ . '/data', 0775, true);
+  }
+  $logs = [];
+  if (file_exists($file)) {
+    $decoded = json_decode(file_get_contents($file), true);
+    if (is_array($decoded)) {
+      $logs = $decoded;
+    }
+  }
+  $logs[] = $entry;
+  file_put_contents($file, json_encode($logs, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT));
+  respond_json(['ok' => true, 'message' => 'QR log saved.']);
+}
 $pageCounts = increment_page_counter($view);
 $fontAssets = load_local_fonts();
 ?>
@@ -742,6 +775,15 @@ $fontAssets = load_local_fonts();
       </label>
       <div class="row">
         <label class="field">
+          <span>QR style</span>
+          <select id="qrStyle">
+            <option value="classic" selected>Classic</option>
+            <option value="rounded">Rounded</option>
+            <option value="dots">Dots</option>
+            <option value="classy">Classy</option>
+          </select>
+        </label>
+        <label class="field">
           <span>QR size (px)</span>
           <input type="number" id="qrSize" min="60" max="600" value="160" />
         </label>
@@ -754,11 +796,26 @@ $fontAssets = load_local_fonts();
           <input type="number" id="qrY" value="40" />
         </label>
       </div>
+      <label class="field">
+        <span>QR label text</span>
+        <input type="text" id="qrLabel" placeholder="e.g., Scan me" />
+      </label>
+      <div class="row">
+        <label class="field">
+          <span>Label size (px)</span>
+          <input type="number" id="qrLabelSize" min="10" max="64" value="20" />
+        </label>
+        <label class="field">
+          <span>Label color</span>
+          <input type="color" id="qrLabelColor" value="#ffffff" />
+        </label>
+      </div>
       <div class="row">
         <button id="generateQr">Generate QR</button>
         <button id="downloadQrPng" class="secondary">Download PNG</button>
         <button id="downloadQrSvg" class="secondary">Download SVG</button>
       </div>
+      <div class="info-box" id="qrStatus">Provide a URL to generate a QR code.</div>
     </section>
 
     <section class="preview">
@@ -1242,6 +1299,7 @@ $fontAssets = load_local_fonts();
   <?php endif; ?>
 
   <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qr-code-styling@1.6.0/lib/qr-code-styling.js"></script>
   <script src="assets/app.js"></script>
 </body>
 </html>
