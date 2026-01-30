@@ -48,8 +48,11 @@ const elements = {
   addTemplate: document.getElementById("addTemplate"),
   widthInput: document.getElementById("widthInput"),
   heightInput: document.getElementById("heightInput"),
+  bgMode: document.getElementById("bgMode"),
   bgColor: document.getElementById("bgColor"),
-  transparentBg: document.getElementById("transparentBg"),
+  bgColorRow: document.getElementById("bgColorRow"),
+  bgImageRow: document.getElementById("bgImageRow"),
+  bgImageInput: document.getElementById("bgImageInput"),
   textInput: document.getElementById("textInput"),
   textEditor: document.getElementById("textEditor"),
   editorToolbar: document.querySelector(".editor-toolbar"),
@@ -75,6 +78,7 @@ const elements = {
   downloadQrPng: document.getElementById("downloadQrPng"),
   downloadQrSvg: document.getElementById("downloadQrSvg"),
   exportFrame: document.getElementById("exportFrame"),
+  refreshPreview: document.getElementById("refreshPreview"),
   downloadVideo: document.getElementById("downloadVideo"),
   videoDuration: document.getElementById("videoDuration"),
   videoFormat: document.getElementById("videoFormat"),
@@ -149,9 +153,14 @@ if (elements.canvas) {
 }
 let qrImage = null;
 let qrSvg = "";
+let backgroundImage = null;
+let backgroundImageUrl = "";
 let lastTime = performance.now();
 let scrollPosition = 0;
 let wizardCurrentStep = 1;
+let needsFit = true;
+const MIN_FONT_SIZE = 12;
+const FIT_PADDING = 20;
 
 function buildBestTimes(date) {
   const day = date.getDay();
@@ -599,10 +608,12 @@ function resizeCanvas() {
   elements.canvas.width = width;
   elements.canvas.height = height;
   scrollPosition = 0;
+  needsFit = true;
+  updateAutoDuration();
 }
 
-function buildFont() {
-  const size = Number(elements.fontSize.value) || 64;
+function buildFont(sizeOverride) {
+  const size = Number(sizeOverride ?? elements.fontSize.value) || 64;
   const custom = elements.customFont.value.trim();
   const font = custom || elements.fontSelect.value || "Inter";
   const weight = elements.fontWeight.value || "400";
@@ -612,16 +623,65 @@ function buildFont() {
 
 function drawBackground() {
   if (!ctx) return;
-  if (elements.transparentBg.checked) {
+  const mode = elements.bgMode?.value || "color";
+  if (mode === "transparent") {
     ctx.clearRect(0, 0, elements.canvas.width, elements.canvas.height);
     return;
   }
-  ctx.fillStyle = elements.bgColor.value;
+  if (mode === "image") {
+    ctx.clearRect(0, 0, elements.canvas.width, elements.canvas.height);
+    if (backgroundImage) {
+      drawBackgroundImage(backgroundImage);
+    }
+    return;
+  }
+  const fill = mode === "white" ? "#ffffff" : elements.bgColor.value;
+  ctx.fillStyle = fill;
   ctx.fillRect(0, 0, elements.canvas.width, elements.canvas.height);
 }
 
-function getLines() {
+function drawBackgroundImage(image) {
+  if (!ctx) return;
+  const canvasWidth = elements.canvas.width;
+  const canvasHeight = elements.canvas.height;
+  const scale = Math.max(canvasWidth / image.width, canvasHeight / image.height);
+  const drawWidth = image.width * scale;
+  const drawHeight = image.height * scale;
+  const offsetX = (canvasWidth - drawWidth) / 2;
+  const offsetY = (canvasHeight - drawHeight) / 2;
+  ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
+}
+
+function updateBackgroundModeUI() {
+  if (!elements.bgMode) return;
+  const mode = elements.bgMode.value;
+  if (elements.bgColorRow) {
+    elements.bgColorRow.hidden = mode !== "color";
+  }
+  if (elements.bgImageRow) {
+    elements.bgImageRow.hidden = mode !== "image";
+  }
+  refreshPreview();
+}
+
+function loadBackgroundImage(file) {
+  if (!file) return;
+  if (backgroundImageUrl) {
+    URL.revokeObjectURL(backgroundImageUrl);
+  }
+  const url = URL.createObjectURL(file);
+  backgroundImageUrl = url;
+  const img = new Image();
+  img.onload = () => {
+    backgroundImage = img;
+    refreshPreview();
+  };
+  img.src = url;
+}
+
+function getLines(sizeOverride) {
   if (!ctx) return [""];
+  ctx.font = buildFont(sizeOverride);
   const sourceText = elements.textEditor?.innerText || elements.textInput?.value || "";
   const rawLines = sourceText.split("\n");
   if (elements.autoParagraph.value !== "on") return rawLines;
@@ -647,16 +707,50 @@ function getLines() {
   return wrapped.length ? wrapped : [""];
 }
 
-function updateWarning(textMetrics) {
-  if (!ctx) return;
-  const lines = getLines();
-  const lineHeight = Number(elements.fontSize.value) + Number(elements.lineSpacing.value);
+function measureTextBlock(sizeOverride) {
+  if (!ctx) {
+    return {
+      lines: [""],
+      lineHeight: 0,
+      textHeight: 0,
+      maxLineWidth: 0,
+      size: Number(sizeOverride ?? elements.fontSize.value) || 64,
+    };
+  }
+  const size = Number(sizeOverride ?? elements.fontSize.value) || 64;
+  const lines = getLines(size);
+  const lineHeight = size + Number(elements.lineSpacing.value);
+  const maxLineWidth = Math.max(...lines.map((line) => ctx.measureText(line).width), 0);
   const textHeight = lines.length * lineHeight;
+  return { lines, lineHeight, textHeight, maxLineWidth, size };
+}
+
+function ensureTextFits() {
+  if (!ctx) return;
+  let size = Number(elements.fontSize.value) || 64;
+  const maxWidth = elements.canvas.width - FIT_PADDING * 2;
+  const maxHeight = elements.canvas.height - FIT_PADDING * 2;
+  let guard = 0;
+  while (size > MIN_FONT_SIZE && guard < 40) {
+    const metrics = measureTextBlock(size);
+    if (metrics.maxLineWidth <= maxWidth && metrics.textHeight <= maxHeight) break;
+    size -= 2;
+    guard += 1;
+  }
+  if (size < MIN_FONT_SIZE) size = MIN_FONT_SIZE;
+  if (Number(elements.fontSize.value) !== size) {
+    elements.fontSize.value = size;
+  }
+  needsFit = false;
+}
+
+function updateWarning() {
+  if (!ctx) return;
+  const metrics = measureTextBlock();
   const widthLimit = elements.canvas.width - 10;
   const heightLimit = elements.canvas.height - 10;
-  const maxLineWidth = Math.max(...lines.map((line) => ctx.measureText(line).width), 0);
-  const tooWide = maxLineWidth > widthLimit;
-  const tooTall = textHeight > heightLimit;
+  const tooWide = metrics.maxLineWidth > widthLimit;
+  const tooTall = metrics.textHeight > heightLimit;
   elements.warning.hidden = !(tooWide || tooTall);
 }
 
@@ -667,18 +761,20 @@ function drawText(delta) {
   const offsetX = Number(elements.offsetX.value) || 0;
   const offsetY = Number(elements.offsetY.value) || 0;
 
+  if (needsFit) ensureTextFits();
   ctx.font = buildFont();
   ctx.fillStyle = elements.textColor.value;
   ctx.textBaseline = "top";
   ctx.textAlign = elements.textAlign.value || "center";
 
-  const lines = getLines();
-  const lineHeight = Number(elements.fontSize.value) + Number(elements.lineSpacing.value);
-  const metrics = ctx.measureText(lines[0] || "");
-  updateWarning(metrics);
+  const metrics = measureTextBlock();
+  const lines = metrics.lines;
+  const lineHeight = metrics.lineHeight;
+  const maxLineWidth = metrics.maxLineWidth;
+  updateWarning();
 
   if (direction === "rtl" || direction === "ltr") {
-    const textWidth = metrics.width;
+    const textWidth = maxLineWidth;
     const startX = direction === "rtl" ? elements.canvas.width + textWidth : -textWidth;
     const endX = direction === "rtl" ? -textWidth : elements.canvas.width + textWidth;
     const distance = endX - startX;
@@ -695,7 +791,8 @@ function drawText(delta) {
     });
   } else {
     const textHeight = lines.length * lineHeight;
-    const startY = direction === "btt" ? elements.canvas.height + textHeight : -textHeight;
+    const lead = lineHeight;
+    const startY = direction === "btt" ? elements.canvas.height + lead : -lead;
     const endY = direction === "btt" ? -textHeight : elements.canvas.height + textHeight;
     scrollPosition += (speed * delta * (direction === "btt" ? -1 : 1));
     let y = startY + scrollPosition;
@@ -709,6 +806,34 @@ function drawText(delta) {
       ctx.fillText(line, offsetX + alignOffset, y + offsetY + index * lineHeight);
     });
   }
+}
+
+function updateAutoDuration() {
+  if (!ctx || !elements.videoDuration || !elements.speed) return;
+  if (needsFit) ensureTextFits();
+  const metrics = measureTextBlock();
+  const speed = Math.max(10, Number(elements.speed.value) || 100);
+  const direction = elements.directionSelect.value;
+  let distance = 0;
+  if (direction === "rtl" || direction === "ltr") {
+    distance = elements.canvas.width + metrics.maxLineWidth * 2;
+  } else {
+    distance = elements.canvas.height + metrics.textHeight + metrics.lineHeight;
+  }
+  const duration = Math.max(1, Math.round((distance / speed) * 10) / 10);
+  elements.videoDuration.value = Math.min(duration, 600);
+}
+
+function refreshPreview() {
+  if (!ctx) return;
+  scrollPosition = 0;
+  lastTime = performance.now();
+  needsFit = true;
+  ensureTextFits();
+  updateAutoDuration();
+  drawBackground();
+  drawText(0);
+  drawQr();
 }
 
 function drawQr() {
@@ -786,6 +911,7 @@ function exportPreviewFrame() {
 
 function downloadVideo() {
   if (!elements.canvas) return;
+  refreshPreview();
   const duration = Number(elements.videoDuration.value) || 5;
   const format = elements.videoFormat.value || "webm";
   if (format !== "webm") {
@@ -848,6 +974,9 @@ function bindEvents() {
   if (elements.exportFrame) {
     elements.exportFrame.addEventListener("click", exportPreviewFrame);
   }
+  if (elements.refreshPreview) {
+    elements.refreshPreview.addEventListener("click", refreshPreview);
+  }
   if (elements.downloadVideo) {
     elements.downloadVideo.addEventListener("click", downloadVideo);
   }
@@ -903,12 +1032,68 @@ function bindEvents() {
   if (elements.captionScrollText) {
     elements.captionScrollText.addEventListener("input", updateCaptionPreview);
   }
+  if (elements.bgMode) {
+    elements.bgMode.addEventListener("change", updateBackgroundModeUI);
+  }
+  if (elements.bgColor) {
+    elements.bgColor.addEventListener("input", refreshPreview);
+  }
+  if (elements.bgImageInput) {
+    elements.bgImageInput.addEventListener("change", (event) => {
+      const file = event.target.files?.[0];
+      if (file) loadBackgroundImage(file);
+    });
+  }
+
+  if (elements.textEditor) {
+    elements.textEditor.addEventListener("input", () => {
+      needsFit = true;
+      updateAutoDuration();
+    });
+  }
+  if (elements.textInput) {
+    elements.textInput.addEventListener("input", () => {
+      needsFit = true;
+      updateAutoDuration();
+    });
+  }
+
+  const autoDurationInputs = [
+    elements.textEditor,
+    elements.textInput,
+    elements.autoParagraph,
+    elements.textAlign,
+    elements.fontSelect,
+    elements.customFont,
+    elements.fontSize,
+    elements.fontWeight,
+    elements.fontStyle,
+    elements.lineSpacing,
+    elements.offsetX,
+    elements.offsetY,
+    elements.directionSelect,
+    elements.speed,
+    elements.widthInput,
+    elements.heightInput,
+  ].filter(Boolean);
+
+  autoDurationInputs.forEach((input) => {
+    input.addEventListener("input", () => {
+      needsFit = true;
+      updateAutoDuration();
+    });
+    input.addEventListener("change", () => {
+      needsFit = true;
+      updateAutoDuration();
+    });
+  });
   if (elements.editorToolbar) {
     elements.editorToolbar.addEventListener("click", (event) => {
       const button = event.target.closest("button");
       if (!button) return;
       const cmd = button.dataset.cmd;
       const emoji = button.dataset.emoji;
+      const action = button.dataset.action;
       if (cmd) {
         document.execCommand(cmd, false, null);
         elements.textEditor?.focus();
@@ -916,6 +1101,20 @@ function bindEvents() {
       if (emoji) {
         document.execCommand("insertText", false, emoji);
         elements.textEditor?.focus();
+      }
+      if (action === "copy") {
+        const text = elements.textEditor?.innerText || "";
+        if (text) {
+          navigator.clipboard?.writeText(text);
+        }
+      }
+      if (action === "paste") {
+        if (!navigator.clipboard?.readText) return;
+        navigator.clipboard.readText().then((clipText) => {
+          if (!clipText) return;
+          document.execCommand("insertText", false, clipText);
+          elements.textEditor?.focus();
+        });
       }
     });
   }
@@ -1008,6 +1207,7 @@ if (elements.templateSelect) {
   populateTemplates();
   updateTemplateInputs();
 }
+updateBackgroundModeUI();
 populateCaptionProfiles();
 populateCaptionTemplates();
 updateCaptionPreview();

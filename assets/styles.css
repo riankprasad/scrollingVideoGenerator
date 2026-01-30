@@ -238,6 +238,13 @@ button.secondary {
   gap: 12px;
 }
 
+.preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .template-meta {
   color: #9fb1d6;
   font-size: 13px;

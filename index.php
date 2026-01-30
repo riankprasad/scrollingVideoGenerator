@@ -589,12 +589,21 @@ $fontAssets = load_local_fonts();
         </label>
       </div>
       <label class="field">
+        <span>Background</span>
+        <select id="bgMode">
+          <option value="color" selected>Custom color</option>
+          <option value="white">White</option>
+          <option value="transparent">Transparent</option>
+          <option value="image">Custom image</option>
+        </select>
+      </label>
+      <label class="field" id="bgColorRow">
         <span>Background color</span>
         <input type="color" id="bgColor" value="#0b0f1a" />
       </label>
-      <label class="field checkbox">
-        <input type="checkbox" id="transparentBg" />
-        <span>Transparent background</span>
+      <label class="field" id="bgImageRow" hidden>
+        <span>Background image</span>
+        <input type="file" id="bgImageInput" accept="image/*" />
       </label>
 
       <h2>Scrolling Text</h2>
@@ -611,6 +620,8 @@ $fontAssets = load_local_fonts();
           <button type="button" class="secondary" data-emoji="✨">✨</button>
           <button type="button" class="secondary" data-emoji="🔥">🔥</button>
           <button type="button" class="secondary" data-emoji="✅">✅</button>
+          <button type="button" class="secondary" data-action="copy">Copy</button>
+          <button type="button" class="secondary" data-action="paste">Paste</button>
         </div>
       </label>
       <div class="row">
@@ -706,7 +717,7 @@ $fontAssets = load_local_fonts();
       <div class="row">
         <label class="field">
           <span>Video duration (sec)</span>
-          <input type="number" id="videoDuration" min="1" max="30" value="5" />
+          <input type="number" id="videoDuration" min="1" max="600" value="5" />
         </label>
         <label class="field">
           <span>Format</span>
@@ -752,7 +763,10 @@ $fontAssets = load_local_fonts();
     <section class="preview">
       <div class="preview-header">
         <h2>Live Preview</h2>
-        <div class="template-meta" id="templateMeta"></div>
+        <div class="preview-actions">
+          <div class="template-meta" id="templateMeta"></div>
+          <button id="refreshPreview" class="secondary" type="button">Refresh Preview</button>
+        </div>
       </div>
       <div class="canvas-wrap">
         <canvas id="previewCanvas"></canvas>
