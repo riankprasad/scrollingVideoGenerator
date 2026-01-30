@@ -592,6 +592,7 @@ $fontAssets = load_local_fonts();
         <span>Background</span>
         <select id="bgMode">
           <option value="color" selected>Custom color</option>
+          <option value="black">Black</option>
           <option value="white">White</option>
           <option value="transparent">Transparent</option>
           <option value="image">Custom image</option>

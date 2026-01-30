@@ -635,7 +635,7 @@ function drawBackground() {
     }
     return;
   }
-  const fill = mode === "white" ? "#ffffff" : elements.bgColor.value;
+  const fill = mode === "white" ? "#ffffff" : mode === "black" ? "#000000" : elements.bgColor.value;
   ctx.fillStyle = fill;
   ctx.fillRect(0, 0, elements.canvas.width, elements.canvas.height);
 }
@@ -730,10 +730,13 @@ function ensureTextFits() {
   let size = Number(elements.fontSize.value) || 64;
   const maxWidth = elements.canvas.width - FIT_PADDING * 2;
   const maxHeight = elements.canvas.height - FIT_PADDING * 2;
+  const direction = elements.directionSelect.value;
   let guard = 0;
   while (size > MIN_FONT_SIZE && guard < 40) {
     const metrics = measureTextBlock(size);
-    if (metrics.maxLineWidth <= maxWidth && metrics.textHeight <= maxHeight) break;
+    const widthOk = direction === "ltr" || direction === "rtl" ? true : metrics.maxLineWidth <= maxWidth;
+    const heightOk = direction === "ttb" || direction === "btt" ? true : metrics.textHeight <= maxHeight;
+    if (widthOk && heightOk) break;
     size -= 2;
     guard += 1;
   }
@@ -749,9 +752,12 @@ function updateWarning() {
   const metrics = measureTextBlock();
   const widthLimit = elements.canvas.width - 10;
   const heightLimit = elements.canvas.height - 10;
+  const direction = elements.directionSelect.value;
   const tooWide = metrics.maxLineWidth > widthLimit;
   const tooTall = metrics.textHeight > heightLimit;
-  elements.warning.hidden = !(tooWide || tooTall);
+  const relevantClip = (direction === "ttb" || direction === "btt") ? tooWide :
+    (direction === "ltr" || direction === "rtl") ? tooTall : (tooWide || tooTall);
+  elements.warning.hidden = !relevantClip;
 }
 
 function drawText(delta) {
@@ -935,7 +941,11 @@ function downloadVideo() {
     elements.videoProgress.value = 100;
   };
 
-  recorder.start();
+  requestAnimationFrame(() => {
+    scrollPosition = 0;
+    lastTime = performance.now();
+    recorder.start();
+  });
   const timer = setInterval(() => {
     const elapsed = (performance.now() - startedAt) / 1000;
     const progress = Math.min(100, Math.round((elapsed / duration) * 100));
